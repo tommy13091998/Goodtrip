@@ -1423,7 +1423,7 @@ function App() {
                   <input 
                     type="text" 
                     className="form-input" 
-                    placeholder="e.g. Hiking the Ha Giang Loop!"
+                    placeholder=""
                     value={uploadTitle}
                     onChange={(e) => setUploadTitle(e.target.value)}
                     disabled={isUploading}
@@ -1434,7 +1434,7 @@ function App() {
                   <label className="form-label">Description</label>
                   <textarea 
                     className="form-input" 
-                    placeholder="Tell other travelers about the route, the atmosphere, or tips..."
+                    placeholder=""
                     rows={3}
                     style={{ resize: 'vertical' }}
                     value={uploadDesc}
@@ -1449,7 +1449,7 @@ function App() {
                     <input 
                       type="text" 
                       className="form-input" 
-                      placeholder="e.g. Ha Giang, Vietnam"
+                      placeholder=""
                       value={uploadLoc}
                       onChange={(e) => setUploadLoc(e.target.value)}
                       disabled={isUploading}
