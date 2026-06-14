@@ -1173,3 +1173,81 @@ h1, h2, h3, h4 {
     display: flex !important;
   }
 }
+
+/* Provenance Verification System Styling */
+.provenance-badge {
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.provenance-badge:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+}
+
+.provenance-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 2, 5, 0.85);
+  backdrop-filter: blur(12px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.provenance-modal {
+  width: 100%;
+  max-width: 480px;
+  background: #030307;
+  border: 1px solid var(--neon-cyan);
+  box-shadow: 0 0 30px rgba(0, 240, 255, 0.25);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.provenance-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.provenance-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.hash-display {
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+  background: rgba(0,0,0,0.4);
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 64, 64, 0.2);
+    border-color: rgba(255, 64, 64, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 64, 64, 0.5);
+    border-color: rgba(255, 64, 64, 1);
+  }
+}
+
+.duplicate-warning {
+  animation: pulse-red 2s infinite ease-in-out;
+}

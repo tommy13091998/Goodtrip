@@ -1,3 +1,5 @@
+import type { ProvenanceRecord } from './provenance';
+
 // Lightweight IndexedDB utility for GoodTrip storage & social interactions
 export interface UploadedFile {
   id: string; // Shelby Blob ID or unique local ID
@@ -11,6 +13,8 @@ export interface UploadedFile {
   ownerAddress: string;
   shareableUrl?: string;
   txHash?: string;
+  provenanceHash?: string;
+  provenanceScore?: number;
 }
 
 export interface UserProfile {
@@ -42,7 +46,7 @@ export interface VideoComment {
 
 const DB_NAME = 'ShelbyUploadDB';
 const STORE_NAME = 'files';
-const DB_VERSION = 2; // Upgraded schema version
+const DB_VERSION = 3; // Upgraded schema version to add provenance
 
 export function initDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -89,6 +93,14 @@ export function initDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('comments')) {
         const store = db.createObjectStore('comments', { keyPath: 'id' });
         store.createIndex('videoId', 'videoId', { unique: false });
+      }
+
+      // Store 6: provenance
+      if (!db.objectStoreNames.contains('provenance')) {
+        const store = db.createObjectStore('provenance', { keyPath: 'id' });
+        store.createIndex('fileHash', 'fileHash', { unique: false });
+        store.createIndex('fileId', 'fileId', { unique: false });
+        store.createIndex('walletAddress', 'walletAddress', { unique: false });
       }
     };
   });
@@ -343,3 +355,43 @@ export async function getVideoComments(videoId: string): Promise<VideoComment[]>
     request.onerror = () => reject(request.error);
   });
 }
+
+// PROVENANCE UTILITIES
+export async function saveProvenance(record: ProvenanceRecord): Promise<void> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('provenance', 'readwrite');
+    const store = transaction.objectStore('provenance');
+    const request = store.put(record);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getProvenanceByHash(hash: string): Promise<ProvenanceRecord | null> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('provenance', 'readonly');
+    const store = transaction.objectStore('provenance');
+    const index = store.index('fileHash');
+    const request = index.get(hash);
+
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getProvenanceByFileId(fileId: string): Promise<ProvenanceRecord | null> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('provenance', 'readonly');
+    const store = transaction.objectStore('provenance');
+    const index = store.index('fileId');
+    const request = index.get(fileId);
+
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+

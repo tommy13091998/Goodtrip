@@ -12,8 +12,13 @@ import {
   saveProfile, getProfile, followCreator, unfollowCreator, getFollows,
   getFollowersCount, likeVideo, unlikeVideo, isVideoLiked, 
   getVideoLikesCount, addComment, getVideoComments,
-  getAllPublicFiles
+  getAllPublicFiles, saveProvenance, getProvenanceByHash, getProvenanceByFileId,
+  saveFileRecord
 } from './services/db';
+import {
+  generateFileHash, buildProvenanceRecord, shortenHash, getStatusColor, getStatusLabel,
+  type ProvenanceRecord, type DuplicateCheckResult
+} from './services/provenance';
 
 
 
@@ -63,6 +68,7 @@ interface FeedVideoItem {
   commentsCount: number;
   isDemo?: boolean;
   fileRecord?: UploadedFile;
+  provenanceRecord?: ProvenanceRecord;
 }
 
 const PETRA_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAZCAYAAABQDyyRAAACkElEQVR4AbxVO2wTQRB9rD/n2OAE4zghsRJ+iZQOiRaoQ8uno6AjBQUlBSX0QaKgRKJB4lOnoQm0SCAhIgVwEnBCfDGObWLnzr/LzPnOunPO8Tnxxdq3u7MzO29md7wnNKWsWfFn6Zv2dfGDJq+mtKKc6SuUwraNi3kFLL/0Sgr5f1lMTM0gFI5YNP2ZVtQKVFW1OWsFIG+sI7eVQfLiNHw+n82onwIHUa1UWi71AHZLO1j7sYyzE+c9JTdZFUVFo9HQRT2A9GoKifGkJ8euszh05lWIAt35bqmEWGLUwQyYu5M4Ehyd0mKtWkO9VoOQNzeIfISWjr9VqlWI4nYeg7H4odjjdGgzlwHGYRzwKYhT0SHae4Lgvl2fBeZfA88Ij+cBBsu37rn3YVqKcPSkOXc1Msn9R8AwZW/dwPJNCuDGbetq97mQQuHuVoYFZ84khug43H0ARHrISQSkkKMjp0Ur+dIX4N1LO8o7zV3XZpujm174fPpT0NV28hJsx/6dAnhPAZjgf3HYyJxtuzo0DNyxk7HpnKb72hzVhDXrrc19Jh0XRL3efBI7WhgKLjJjahvayVn5cYF7dxBVVXFn6WDFQV25aldwXfR0AqpStnvoQWKiJw8Bs/iYnGuiBxcQ5aJRul120QcTXHgmssY9r/0EOIhXz4FeyZlS/C/madQIB7fPn4CnlK2JRcs9cxALbw/e30kroqeHUMhlO+k9XfcH/BCJ0THk5IynRJ2cBwMBiMEzcQxEIhSEcalt1i/eyDgK2ty1RM7e56cT4JXkuQuQ19NQyiUWjwWSJOk8+ks4QF+Pyalp/P29gnq9riu87EIhCULo1Gj2xJYYG0dseATpX8ueBhGUgggEg8TYbHsAAAD//+keTVcAAAAGSURBVAMAFglcF1kczz0AAAAASUVORK5CYII=";
@@ -164,6 +170,12 @@ function App() {
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Provenance State
+  const [pendingFileHash, setPendingFileHash] = useState<string>('');
+  const [isHashComputing, setIsHashComputing] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateCheckResult | null>(null);
+  const [provenanceModalRecord, setProvenanceModalRecord] = useState<ProvenanceRecord | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setNotification({ message, type });
@@ -314,6 +326,20 @@ function App() {
   // Build feed combining demo content and DB uploads
   const buildFeed = async () => {
     console.log("buildFeed starting...");
+    
+    // Fetch provenance records for all public files
+    const provenanceMap = new Map<string, ProvenanceRecord>();
+    try {
+      const provRecords = await Promise.all(
+        publicFeedFiles.map(f => getProvenanceByFileId(f.id))
+      );
+      provRecords.forEach(rec => {
+        if (rec) provenanceMap.set(rec.fileId, rec);
+      });
+    } catch (provErr) {
+      console.error('Failed to load provenance records for feed:', provErr);
+    }
+
     const localVideos: FeedVideoItem[] = publicFeedFiles
       .filter(f => !f.isPrivate && (f.type.startsWith('video/') || f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mov')))
       .map(f => {
@@ -348,7 +374,8 @@ function App() {
           likesCount: 0,
           commentsCount: 0,
           isDemo: false,
-          fileRecord: f
+          fileRecord: f,
+          provenanceRecord: provenanceMap.get(f.id)
         };
       });
 
@@ -679,11 +706,31 @@ function App() {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
-    recorder.onstop = () => {
+    recorder.onstop = async () => {
       const videoBlob = new Blob(chunks, { type: 'video/webm' });
       setRecordedBlob(videoBlob);
       setRecordedUrl(URL.createObjectURL(videoBlob));
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+
+      try {
+        setIsHashComputing(true);
+        setDuplicateWarning(null);
+        const hash = await generateFileHash(videoBlob);
+        setPendingFileHash(hash);
+        const existing = await getProvenanceByHash(hash);
+        if (existing) {
+          setDuplicateWarning({
+            isDuplicate: true,
+            originalFileId: existing.fileId,
+            originalWallet: existing.walletAddress,
+            originalUploadTime: existing.uploadTimestamp
+          });
+        }
+      } catch (err) {
+        console.error('Failed to compute recorded video hash:', err);
+      } finally {
+        setIsHashComputing(false);
+      }
     };
 
     mediaRecorderRef.current = recorder;
@@ -727,25 +774,46 @@ function App() {
     setUploadStatus('Generating high quality mock travel video...');
 
     setTimeout(async () => {
+      let videoBlob: Blob;
       try {
         const demoVideoUrl = 'https://player.vimeo.com/external/434045526.sd.mp4?s=c27d2ad4bfe6e161a4c3093b5b18aa6065e8947b&profile_id=165&oauth2_token_id=57447761';
         const response = await fetch(demoVideoUrl);
-        const videoBlob = await response.blob();
+        videoBlob = await response.blob();
         setRecordedBlob(videoBlob);
         setRecordedUrl(URL.createObjectURL(videoBlob));
         setIsUploading(false);
         showToast('Simulated travel video recorded successfully!', 'success');
       } catch (err) {
-        const dummyBlob = new Blob([new Uint8Array(1000)], { type: 'video/mp4' });
-        setRecordedBlob(dummyBlob);
+        videoBlob = new Blob([new Uint8Array(1000)], { type: 'video/mp4' });
+        setRecordedBlob(videoBlob);
         setRecordedUrl('');
         setIsUploading(false);
         showToast('Simulated travel clip created!', 'success');
       }
+
+      try {
+        setIsHashComputing(true);
+        setDuplicateWarning(null);
+        const hash = await generateFileHash(videoBlob);
+        setPendingFileHash(hash);
+        const existing = await getProvenanceByHash(hash);
+        if (existing) {
+          setDuplicateWarning({
+            isDuplicate: true,
+            originalFileId: existing.fileId,
+            originalWallet: existing.walletAddress,
+            originalUploadTime: existing.uploadTimestamp
+          });
+        }
+      } catch (hashErr) {
+        console.error('Failed to compute mock video hash:', hashErr);
+      } finally {
+        setIsHashComputing(false);
+      }
     }, 1200);
   };
 
-  const handleLocalVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLocalVideoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (fileList && fileList.length > 0) {
       const file = fileList[0];
@@ -756,6 +824,26 @@ function App() {
       setRecordedBlob(file);
       setRecordedUrl(URL.createObjectURL(file));
       setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
+
+      try {
+        setIsHashComputing(true);
+        setDuplicateWarning(null);
+        const hash = await generateFileHash(file);
+        setPendingFileHash(hash);
+        const existing = await getProvenanceByHash(hash);
+        if (existing) {
+          setDuplicateWarning({
+            isDuplicate: true,
+            originalFileId: existing.fileId,
+            originalWallet: existing.walletAddress,
+            originalUploadTime: existing.uploadTimestamp
+          });
+        }
+      } catch (err) {
+        console.error('Failed to compute local file hash:', err);
+      } finally {
+        setIsHashComputing(false);
+      }
     }
   };
 
@@ -782,7 +870,7 @@ function App() {
       const serializedName = `${uploadTitle.trim()}|${uploadDesc.trim()}|${uploadLoc.trim()}|${uploadCat}.mp4`;
       const fileObject = new File([recordedBlob], serializedName, { type: recordedBlob.type || 'video/mp4' });
 
-      await ShelbyService.uploadFile(
+      const fileRecord = await ShelbyService.uploadFile(
         fileObject,
         isPrivate,
         wallet,
@@ -800,12 +888,34 @@ function App() {
         aptosSignAndSubmitTransaction
       );
 
+      // Create and save Provenance Record
+      const provRecord = buildProvenanceRecord({
+        fileId: fileRecord.id,
+        fileHash: pendingFileHash,
+        fileName: fileRecord.name,
+        fileSize: fileRecord.size,
+        fileType: fileRecord.type,
+        walletAddress: wallet.address,
+        location: uploadLoc.trim() || undefined,
+        isDuplicate: !!duplicateWarning?.isDuplicate,
+        duplicateOf: duplicateWarning?.originalFileId,
+        hasMetadata: !!(uploadTitle.trim() && uploadDesc.trim()),
+      });
+      await saveProvenance(provRecord);
+
+      // Save provenance details back to fileRecord as well
+      fileRecord.provenanceHash = pendingFileHash;
+      fileRecord.provenanceScore = provRecord.provenanceScore;
+      await saveFileRecord(fileRecord);
+
       showToast(`Trip "${uploadTitle}" shared on Shelby!`, 'success');
       setUploadTitle('');
       setUploadDesc('');
       setUploadLoc('');
       setRecordedBlob(null);
       setRecordedUrl('');
+      setPendingFileHash('');
+      setDuplicateWarning(null);
       
       await loadUserFiles();
       await loadFeedFiles();
@@ -1047,6 +1157,7 @@ function App() {
                     onCopy={() => copyShareLink(item.id, item.videoUrl)}
                     onOpenComments={() => handleOpenComments(item.id)}
                     onOpenCreator={() => handleOpenCreatorProfile(item.ownerAddress)}
+                    onOpenProvenanceModal={(record) => setProvenanceModalRecord(record)}
                   />
                 ))}
 
@@ -1201,6 +1312,8 @@ function App() {
                       onClick={() => {
                         setRecordedBlob(null);
                         setRecordedUrl('');
+                        setPendingFileHash('');
+                        setDuplicateWarning(null);
                         startCamera();
                       }}
                       disabled={isUploading}
@@ -1219,6 +1332,73 @@ function App() {
                   <Sparkles size={18} style={{ color: 'var(--accent-cyan)' }} />
                   Describe Your Trip
                 </h3>
+
+                {/* Provenance Verification Hud */}
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: 'rgba(10, 10, 26, 0.6)',
+                  border: '1px solid rgba(0, 240, 255, 0.2)',
+                  borderRadius: '8px',
+                  fontFamily: 'monospace',
+                  fontSize: '12px'
+                }}>
+                  <div style={{ color: '#00f0ff', fontWeight: 'bold', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px', textShadow: '0 0 5px rgba(0, 240, 255, 0.5)' }}>
+                    <Shield size={14} />
+                    PROVENANCE FINGERPRINT SYSTEM
+                  </div>
+                  
+                  {isHashComputing ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
+                      <Loader2 size={12} className="spinner" />
+                      <span>Hashing media bytes using SHA-256...</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Media Hash:</span>
+                        <span style={{ color: '#00f0ff', wordBreak: 'break-all' }}>{pendingFileHash ? shortenHash(pendingFileHash, 16) : 'N/A'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Status:</span>
+                        <span style={{ 
+                          color: duplicateWarning ? '#ff4040' : '#00f0ff', 
+                          fontWeight: 'bold',
+                          textShadow: duplicateWarning ? '0 0 5px rgba(255,64,64,0.5)' : '0 0 5px rgba(0,240,255,0.5)'
+                        }}>
+                          {duplicateWarning ? '⚠ DUPLICATE DETECTED' : '✓ UNIQUE METADATA'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Duplicate Warning Banner */}
+                {duplicateWarning && (
+                  <div className="duplicate-warning" style={{
+                    padding: '12px',
+                    backgroundColor: 'rgba(255, 64, 64, 0.1)',
+                    border: '1px solid #ff4040',
+                    borderRadius: '8px',
+                    color: '#ff4040',
+                    fontSize: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    animation: 'pulse 2s infinite'
+                  }}>
+                    <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <AlertCircle size={14} />
+                      Duplicate Video Source Found
+                    </div>
+                    <p style={{ margin: 0, opacity: 0.9 }}>
+                      This video hash matches an existing post. Recording or uploading duplicate stories reduces Provenance score.
+                    </p>
+                    <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '2px', fontFamily: 'monospace' }}>
+                      Original Owner: {duplicateWarning.originalWallet?.slice(0, 8)}...{duplicateWarning.originalWallet?.slice(-6)}<br />
+                      Uploaded At: {duplicateWarning.originalUploadTime ? new Date(duplicateWarning.originalUploadTime).toLocaleString() : 'Unknown'}
+                    </div>
+                  </div>
+                )}
                 
                 <div className="form-group">
                   <label className="form-label">Trip Title *</label>
@@ -1304,10 +1484,20 @@ function App() {
                   <button 
                     className="btn btn-primary" 
                     onClick={handleUploadPost}
-                    style={{ marginTop: '12px' }}
+                    disabled={isHashComputing || isUploading}
+                    style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   >
-                    <Upload size={16} />
-                    Post Trip to Shelby
+                    {isHashComputing ? (
+                      <>
+                        <Loader2 size={16} className="spinner" />
+                        Analyzing Fingerprint...
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={16} />
+                        Post Trip to Shelby
+                      </>
+                    )}
                   </button>
                 )}
               </div>
@@ -1844,6 +2034,155 @@ function App() {
             )}
           </div>
         </div>
+      )}      {/* PROVENANCE DETAIL MODAL */}
+      {provenanceModalRecord && (
+        <div className="provenance-modal-overlay" onClick={() => setProvenanceModalRecord(null)}>
+          <div className="provenance-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="provenance-modal-header">
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#00f0ff', textShadow: '0 0 10px rgba(0,240,255,0.5)' }}>
+                <Shield size={20} />
+                PROVENANCE FINGERPRINT SYSTEM
+              </h3>
+              <button 
+                className="video-action-button" 
+                onClick={() => setProvenanceModalRecord(null)}
+                style={{ width: '28px', height: '28px', borderColor: 'rgba(0, 240, 255, 0.3)' }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="provenance-modal-body">
+              {/* Status Badge & Score Bar */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>VERIFICATION STATUS</span>
+                  <span style={{ 
+                    color: getStatusColor(provenanceModalRecord.verificationStatus), 
+                    fontWeight: 'bold', 
+                    fontSize: '18px', 
+                    letterSpacing: '0.05em',
+                    textShadow: `0 0 8px ${getStatusColor(provenanceModalRecord.verificationStatus)}aa`
+                  }}>
+                    {getStatusLabel(provenanceModalRecord.verificationStatus)}
+                  </span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>PROVENANCE SCORE</span>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#00f0ff' }}>
+                    {provenanceModalRecord.provenanceScore}/100
+                  </div>
+                </div>
+              </div>
+
+              {/* Score breakdown visualization */}
+              <div style={{ marginBottom: '20px' }}>
+                <div className="provenance-score-bar-bg" style={{
+                  height: '8px',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                  marginBottom: '16px',
+                  border: '1px solid rgba(255,255,255,0.1)'
+                }}>
+                  <div className="provenance-score-bar" style={{
+                    height: '100%',
+                    width: `${provenanceModalRecord.provenanceScore}%`,
+                    background: `linear-gradient(90deg, #ff2d78 0%, #ffc72c 50%, #00f0ff 100%)`,
+                    boxShadow: '0 0 10px rgba(0, 240, 255, 0.5)'
+                  }}></div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: provenanceModalRecord.scoreBreakdown.uniqueHash > 0 ? '#00f0ff' : 'var(--text-muted)' }}>
+                    <span>✓ Content Uniqueness</span>
+                    <span>+{provenanceModalRecord.scoreBreakdown.uniqueHash} pts</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: provenanceModalRecord.scoreBreakdown.walletLinked > 0 ? '#00f0ff' : 'var(--text-muted)' }}>
+                    <span>✓ Wallet Signature Linked</span>
+                    <span>+{provenanceModalRecord.scoreBreakdown.walletLinked} pts</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: provenanceModalRecord.scoreBreakdown.validFileData > 0 ? '#00f0ff' : 'var(--text-muted)' }}>
+                    <span>✓ File Structure Integrity</span>
+                    <span>+{provenanceModalRecord.scoreBreakdown.validFileData} pts</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: provenanceModalRecord.scoreBreakdown.locationProvided > 0 ? '#00f0ff' : 'var(--text-muted)' }}>
+                    <span>✓ Declared Location</span>
+                    <span>+{provenanceModalRecord.scoreBreakdown.locationProvided} pts</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: provenanceModalRecord.scoreBreakdown.metadataComplete > 0 ? '#00f0ff' : 'var(--text-muted)' }}>
+                    <span>✓ Post Metadata Completeness</span>
+                    <span>+{provenanceModalRecord.scoreBreakdown.metadataComplete} pts</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Hex / Monospace technical data */}
+              <div style={{
+                backgroundColor: 'rgba(10, 10, 26, 0.8)',
+                border: '1px solid rgba(0, 240, 255, 0.15)',
+                borderRadius: '8px',
+                padding: '16px',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}>
+                <div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>SHA-256 HASH</div>
+                  <div className="hash-display" style={{ wordBreak: 'break-all', color: '#00f0ff' }}>
+                    {provenanceModalRecord.fileHash}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>FILE SIZE</div>
+                    <div style={{ color: '#fff' }}>
+                      {(provenanceModalRecord.fileSize / (1024 * 1024)).toFixed(2)} MB
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>FILE TYPE</div>
+                    <div style={{ color: '#fff' }}>
+                      {provenanceModalRecord.fileType}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>OWNER WALLET</div>
+                  <div style={{ color: '#fff', wordBreak: 'break-all' }}>
+                    {provenanceModalRecord.walletAddress}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>DEVICE INFO</div>
+                    <div style={{ color: '#fff' }}>
+                      {provenanceModalRecord.deviceInfo}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>TIMESTAMP</div>
+                    <div style={{ color: '#fff' }}>
+                      {new Date(provenanceModalRecord.uploadTimestamp).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+
+                {provenanceModalRecord.duplicateOf && (
+                  <div style={{ borderTop: '1px solid rgba(255, 64, 64, 0.2)', paddingTop: '8px', color: '#ff4040' }}>
+                    <div style={{ fontWeight: 'bold' }}>DUPLICATE DETECTED</div>
+                    <div>Original File ID: {provenanceModalRecord.duplicateOf}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
@@ -1860,9 +2199,10 @@ interface FeedVideoCardProps {
   onCopy: () => void;
   onOpenComments: () => void;
   onOpenCreator: () => void;
+  onOpenProvenanceModal?: (record: ProvenanceRecord) => void;
 }
 
-function FeedVideoCard({ item, muted, liked, copied, onLike, onCopy, onOpenComments, onOpenCreator }: FeedVideoCardProps) {
+function FeedVideoCard({ item, muted, liked, copied, onLike, onCopy, onOpenComments, onOpenCreator, onOpenProvenanceModal }: FeedVideoCardProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -2050,18 +2390,89 @@ function FeedVideoCard({ item, muted, liked, copied, onLike, onCopy, onOpenComme
 
         {/* HUD Overlay details */}
         <div className="video-overlay-ui">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span 
-              className="badge" 
-              style={{ 
-                background: 'rgba(0,0,0,0.6)', 
-                color: 'white', 
-                border: '1px solid rgba(255,255,255,0.15)',
-                fontSize: '11px'
-              }}
-            >
-              {item.category}
-            </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <span 
+                className="badge" 
+                style={{ 
+                  background: 'rgba(0,0,0,0.6)', 
+                  color: 'white', 
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  fontSize: '11px'
+                }}
+              >
+                {item.category}
+              </span>
+
+              {item.provenanceRecord ? (
+                <span 
+                  className="provenance-badge"
+                  style={{ 
+                    backgroundColor: 'rgba(10, 10, 26, 0.8)',
+                    color: getStatusColor(item.provenanceRecord.verificationStatus),
+                    border: `1px solid ${getStatusColor(item.provenanceRecord.verificationStatus)}`,
+                    boxShadow: `0 0 8px ${getStatusColor(item.provenanceRecord.verificationStatus)}44`,
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    letterSpacing: '0.05em',
+                    fontFamily: 'monospace',
+                    padding: '3px 8px',
+                    borderRadius: '4px'
+                  }}
+                  onClick={() => onOpenProvenanceModal?.(item.provenanceRecord!)}
+                >
+                  {getStatusLabel(item.provenanceRecord.verificationStatus)}
+                </span>
+              ) : (
+                <span 
+                  className="provenance-badge"
+                  style={{ 
+                    backgroundColor: 'rgba(10, 10, 26, 0.8)',
+                    color: '#00f0ff',
+                    border: `1px solid #00f0ff`,
+                    boxShadow: `0 0 8px rgba(0, 240, 255, 0.35)`,
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    letterSpacing: '0.05em',
+                    fontFamily: 'monospace',
+                    padding: '3px 8px',
+                    borderRadius: '4px'
+                  }}
+                  onClick={() => {
+                    const mockRecord = {
+                      id: `prov-demo-${item.id}`,
+                      fileId: item.id,
+                      fileHash: item.id === 'demo-1' 
+                        ? '8f9c1b2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b' 
+                        : item.id === 'demo-2'
+                        ? '3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b'
+                        : '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b',
+                      fileName: `${item.title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.mp4`,
+                      fileSize: 15420310,
+                      fileType: 'video/mp4',
+                      walletAddress: item.ownerAddress,
+                      uploadTimestamp: item.uploadedAt || new Date().toISOString(),
+                      deviceInfo: 'GoPro Hero 11 / macOS / Desktop',
+                      verificationStatus: 'verified' as const,
+                      provenanceScore: 95,
+                      location: item.location,
+                      scoreBreakdown: {
+                        uniqueHash: 30,
+                        walletLinked: 25,
+                        validFileData: 20,
+                        locationProvided: 10,
+                        metadataComplete: 15
+                      }
+                    };
+                    onOpenProvenanceModal?.(mockRecord);
+                  }}
+                >
+                  ✓ VERIFIED (DEMO)
+                </span>
+              )}
+            </div>
 
             {item.isDemo && (
               <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.25)', color: 'var(--accent-cyan)', fontSize: '10px' }}>
