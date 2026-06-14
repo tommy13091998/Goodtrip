@@ -71,13 +71,7 @@ interface FeedVideoItem {
   provenanceRecord?: ProvenanceRecord;
 }
 
-const PETRA_LOGO = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <rect width="120" height="120" rx="28" fill="#1A1D26"/>
-  <path d="M60 20 L95 40 L95 80 L60 100 L25 80 L25 40 Z" fill="#00D292"/>
-  <path d="M60 20 L60 100 L25 80 L25 40 Z" fill="#00A875"/>
-  <path d="M60 35 L80 50 L80 70 L60 85 L40 70 L40 50 Z" fill="#FFFFFF" opacity="0.85"/>
-  <path d="M60 35 L60 85 L40 70 L40 50 Z" fill="#DDFDF5" opacity="0.85"/>
-</svg>`)}`;
+const PETRA_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAZCAYAAABQDyyRAAACkElEQVR4AbxVO2wTQRB9rD/n2OAE4zghsRJ+iZQOiRaoQ8uno6AjBQUlBSX0QaKgRKJB4lOnoQm0SCAhIgVwEnBCfDGObWLnzr/LzPnOunPO8Tnxxdq3u7MzO29md7wnNKWsWfFn6Zv2dfGDJq+mtKKc6SuUwraNi3kFLL/0Sgr5f1lMTM0gFI5YNP2ZVtQKVFW1OWsFIG+sI7eVQfLiNHw+n82onwIHUa1UWi71AHZLO1j7sYyzE+c9JTdZFUVFo9HQRT2A9GoKifGkJ8euszh05lWIAt35bqmEWGLUwQyYu5M4Ehyd0mKtWkO9VoOQNzeIfISWjr9VqlWI4nYeg7H4odjjdGgzlwHGYRzwKYhT0SHae4Lgvl2fBeZfA88Ij+cBBsu37rn3YVqKcPSkOXc1Msn9R8AwZW/dwPJNCuDGbetq97mQQuHuVoYFZ84khug43H0ARHrISQSkkKMjp0Ur+dIX4N1LO8o7zV3XZpujm174fPpT0NV28hJsx/6dAnhPAZjgf3HYyJxtuzo0DNyxk7HpnKb72hzVhDXrrc19Jh0XRL3efBI7WhgKLjJjahvayVn5cYF7dxBVVXFn6WDFQV25aldwXfR0AqpStnvoQWKiJw8Bs/iYnGuiBxcQ5aJRul120QcTXHgmssY9r/0EOIhXz4FeyZlS/C/madQIB7fPn4CnlK2JRcs9cxALbw/e30kroqeHUMhlO+k9XfcH/BCJ0THk5IynRJ2cBwMBiMEzcQxEIhSEcalt1i/eyDgK2ty1RM7e56cT4JXkuQuQ19NQyiUWjwWSJOk8+ks4QF+Pyalp/P29gnq9riu87EIhCULo1Gj2xJYYG0dseATXX8ueBhGUgggEg8TYbHsAAAD//+keTVcAAAAGSURBVAMAFglcF1kczz0AAAAASUVORK5CYII=";
 const METAMASK_LOGO = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 318.6 360">
   <style>
     .st1,.st6{fill:#e4761b;stroke:#e4761b;stroke-linecap:round;stroke-linejoin:round}.st6{fill:#f6851b;stroke:#f6851b}
