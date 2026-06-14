@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="22" fill="#ff5bb0"/>
+  <g fill="#241611">
+    <!-- Center Hub -->
+    <circle cx="50" cy="50" r="10"/>
+    
+    <!-- Three Y-arms -->
+    <path d="M 44 50 V 76 A 6 6 0 0 0 56 76 V 50 Z" />
+    <path d="M 44 50 V 76 A 6 6 0 0 0 56 76 V 50 Z" transform="rotate(120 50 50)" />
+    <path d="M 44 50 V 76 A 6 6 0 0 0 56 76 V 50 Z" transform="rotate(240 50 50)" />
+    
+    <!-- Three Outer Wings -->
+    <path d="M 35.1 28.7 A 26 26 0 0 1 64.9 28.7 L 71.8 18.9 A 38 38 0 0 0 28.2 18.9 Z" />
+    <path d="M 35.1 28.7 A 26 26 0 0 1 64.9 28.7 L 71.8 18.9 A 38 38 0 0 0 28.2 18.9 Z" transform="rotate(120 50 50)" />
+    <path d="M 35.1 28.7 A 26 26 0 0 1 64.9 28.7 L 71.8 18.9 A 38 38 0 0 0 28.2 18.9 Z" transform="rotate(240 50 50)" />
+  </g>
+</svg>
